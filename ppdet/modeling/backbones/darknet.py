@@ -19,6 +19,7 @@ import paddle.nn.functional as F
 from ppdet.core.workspace import register, serializable
 from ppdet.modeling.ops import batch_norm, mish
 from ..shape_spec import ShapeSpec
+from paddle.nn.quant import quant_layers as quant_nn
 
 __all__ = ['DarkNet', 'ConvBNLayer']
 
@@ -154,6 +155,8 @@ class BasicBlock(nn.Layer):
         # example:
         # --------------{conv1} --> {conv2}
         # channel route: 10-->5 --> 5-->10
+        self.add_quantize1 = quant_nn.FakeQuantMovingAverageAbsMax(name = "add_quant1")
+        self.add_quantize2 = quant_nn.FakeQuantMovingAverageAbsMax(name = "add_quant2")
         self.conv1 = ConvBNLayer(
             ch_in=ch_in,
             ch_out=int(ch_out / 2),
@@ -178,7 +181,7 @@ class BasicBlock(nn.Layer):
     def forward(self, inputs):
         conv1 = self.conv1(inputs)
         conv2 = self.conv2(conv1)
-        out = paddle.add(x=inputs, y=conv2)
+        out = paddle.add(x=self.add_quantize1(inputs), y=self.add_quantize2(conv2))
         return out
 
 

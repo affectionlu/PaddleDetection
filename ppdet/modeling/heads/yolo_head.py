@@ -18,6 +18,7 @@ import paddle.nn.functional as F
 from paddle import ParamAttr
 from paddle.regularizer import L2Decay
 from ppdet.core.workspace import register
+from paddle.nn.quant import quant_layers as quant_nn
 
 import math
 import numpy as np
@@ -36,6 +37,28 @@ def _de_sigmoid(x, eps=1e-7):
     x = paddle.clip(1. / x - 1., eps, 1. / eps)
     x = -paddle.log(x)
     return x
+
+class NormConvLayer(nn.Layer):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 data_format,
+                 kernel_size=3,
+                 stride=1,
+                 padding=1,
+                 bias_attr=ParamAttr(regularizer=L2Decay(0.))):
+        super(NormConvLayer, self).__init__()
+        self.conv = nn.Conv2D(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                data_format=data_format,
+                bias_attr=bias_attr)
+    def forward(self, x):
+        x = self.conv(x)
+        return x
 
 
 @register
@@ -77,7 +100,9 @@ class YOLOv3Head(nn.Layer):
         self.parse_anchor(anchors, anchor_masks)
         self.num_outputs = len(self.anchors)
         self.data_format = data_format
-
+        self.yolo_quantize1 = quant_nn.FakeQuantMovingAverageAbsMax(name = "yolo_quant1")
+        self.yolo_quantize2 = quant_nn.FakeQuantMovingAverageAbsMax(name = "yolo_quant2")
+        self.yolo_quantize3 = quant_nn.FakeQuantMovingAverageAbsMax(name = "yolo_quant3")
         self.yolo_outputs = []
         for i in range(len(self.anchors)):
 
@@ -86,13 +111,13 @@ class YOLOv3Head(nn.Layer):
             else:
                 num_filters = len(self.anchors[i]) * (self.num_classes + 5)
             name = 'yolo_output.{}'.format(i)
-            conv = nn.Conv2D(
+            conv = NormConvLayer(
                 in_channels=self.in_channels[i],
                 out_channels=num_filters,
+                data_format=data_format,
                 kernel_size=1,
                 stride=1,
                 padding=0,
-                data_format=data_format,
                 bias_attr=ParamAttr(regularizer=L2Decay(0.)))
             conv.skip_quant = True
             yolo_output = self.add_sublayer(name, conv)
@@ -111,11 +136,26 @@ class YOLOv3Head(nn.Layer):
     def forward(self, feats, targets=None):
         assert len(feats) == len(self.anchors)
         yolo_outputs = []
-        for i, feat in enumerate(feats):
-            yolo_output = self.yolo_outputs[i](feat)
-            if self.data_format == 'NHWC':
-                yolo_output = paddle.transpose(yolo_output, [0, 3, 1, 2])
-            yolo_outputs.append(yolo_output)
+        # for i, feat in enumerate(feats):
+        #     yolo_output = self.yolo_outputs[i](feat)
+        #     if self.data_format == 'NHWC':
+        #         yolo_output = paddle.transpose(yolo_output, [0, 3, 1, 2])
+        #     yolo_outputs.append(yolo_output)
+        # yolo_box 0
+        yolo_output = self.yolo_quantize1(self.yolo_outputs[0](feats[0]))
+        if self.data_format == 'NHWC':
+            yolo_output = paddle.transpose(yolo_output, [0, 3, 1, 2])
+        yolo_outputs.append(yolo_output)
+        # yolo_box 1
+        yolo_output = self.yolo_quantize2(self.yolo_outputs[1](feats[1]))
+        if self.data_format == 'NHWC':
+            yolo_output = paddle.transpose(yolo_output, [0, 3, 1, 2])
+        yolo_outputs.append(yolo_output)
+        # yolo_box 2
+        yolo_output = self.yolo_quantize3(self.yolo_outputs[2](feats[2]))
+        if self.data_format == 'NHWC':
+            yolo_output = paddle.transpose(yolo_output, [0, 3, 1, 2])
+        yolo_outputs.append(yolo_output)
 
         if self.training:
             return self.loss(yolo_outputs, targets, self.anchors)

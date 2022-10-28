@@ -6,7 +6,7 @@ _BASE_: [
   '_base_/yolov3_reader.yml',
 ]
 
-snapshot_epoch: 5
+snapshot_epoch: 1
 weights: output/yolov3_darknet53_270e_voc/model_final
 
 # set collate_batch to false because ground-truth info is needed

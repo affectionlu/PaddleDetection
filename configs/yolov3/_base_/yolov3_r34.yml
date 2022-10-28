@@ -1,5 +1,5 @@
 architecture: YOLOv3
-pretrain_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet34_pretrained.pdparams
+#pretrain_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet34_pretrained.pdparams
 norm_type: sync_bn
 
 YOLOv3:
@@ -9,7 +9,7 @@ YOLOv3:
   post_process: BBoxPostProcess
 
 ResNet:
-  depth: 34
+  depth: 18
   return_idx: [1, 2, 3]
   freeze_at: -1
   freeze_norm: false

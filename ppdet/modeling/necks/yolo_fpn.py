@@ -21,6 +21,7 @@ from ppdet.modeling.ops import get_act_fn
 from ..backbones.darknet import ConvBNLayer
 from ..shape_spec import ShapeSpec
 from ..backbones.csp_darknet import BaseConv, DWConv, CSPLayer
+from paddle.nn.quant import quant_layers as quant_nn
 
 __all__ = ['YOLOv3FPN', 'PPYOLOFPN', 'PPYOLOTinyFPN', 'PPYOLOPAN', 'YOLOCSPPAN']
 
@@ -409,6 +410,9 @@ class YOLOv3FPN(nn.Layer):
         self.yolo_blocks = []
         self.routes = []
         self.data_format = data_format
+        self.concat_quantize1 = quant_nn.FakeQuantMovingAverageAbsMax(name = "quant1")
+        self.concat_quantize2 = quant_nn.FakeQuantMovingAverageAbsMax(name = "quant2")
+        self.interplate_quantize2 = quant_nn.FakeQuantMovingAverageAbsMax(name = "quant3")
         for i in range(self.num_blocks):
             name = 'yolo_block.{}'.format(i)
             in_channel = in_channels[-i - 1]
@@ -455,9 +459,11 @@ class YOLOv3FPN(nn.Layer):
         for i, block in enumerate(blocks):
             if i > 0:
                 if self.data_format == 'NCHW':
-                    block = paddle.concat([route, block], axis=1)
+                    block = paddle.concat([self.concat_quantize1(route),
+                        self.concat_quantize2(block)], axis=1)
                 else:
-                    block = paddle.concat([route, block], axis=-1)
+                    block = paddle.concat([self.concat_quantize1(route),
+                        self.concat_quantize2(block)], axis=-1)
             route, tip = self.yolo_blocks[i](block)
             yolo_feats.append(tip)
 
@@ -467,9 +473,9 @@ class YOLOv3FPN(nn.Layer):
 
             if i < self.num_blocks - 1:
                 route = self.routes[i](route)
-                route = F.interpolate(
-                    route, scale_factor=2., data_format=self.data_format)
-
+                route = F.interpolate(self.interplate_quantize2(route),
+                                      scale_factor=2.,
+                                      data_format=self.data_format)
         if for_mot:
             return {'yolo_feats': yolo_feats, 'emb_feats': emb_feats}
         else:

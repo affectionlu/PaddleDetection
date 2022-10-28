@@ -15,6 +15,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from ppdet.utils.checkpoint import load_pretrain_weight
 
 import os
 import sys
@@ -114,6 +115,7 @@ def run(FLAGS, cfg):
         init_fleet_env(cfg.get('find_unused_parameters', False))
     else:
         # init parallel environment if nranks > 1
+        print("Init parallel env.")
         init_parallel_env()
 
     if FLAGS.enable_ce:

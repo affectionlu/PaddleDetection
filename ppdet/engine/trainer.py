@@ -53,6 +53,7 @@ from .export_utils import _dump_infer_config, _prune_input_spec
 from paddle.distributed.fleet.utils.hybrid_parallel_util import fused_allreduce_gradients
 
 from ppdet.utils.logger import setup_logger
+from  ppdet.slim import structure_prune
 logger = setup_logger('ppdet.engine')
 
 __all__ = ['Trainer']
@@ -215,6 +216,23 @@ class Trainer(object):
         else:
             self._callbacks = []
             self._compose_callback = None
+
+        if self.cfg.get('prune'):
+            self.phase=self.cfg.get('phase')
+            self.pruning_ratio=self.cfg.get('pruning_ratio')
+            self.prune_mask=structure_prune.my_pruner(self.model,self.phase,self.pruning_ratio)
+            self._init_mask()
+        if self.cfg.get('prune_eval'):
+            self.prune_mask= self.cfg.get('prune_eval_mask')
+            self._init_mask()
+    def _init_mask(self):
+        print("-----------------------Init mask.---------------------------------")
+        for name, layer in self.model.named_sublayers():
+            if isinstance(layer, paddle.nn.quant.quant_layers.QuantizedConv2D) or isinstance(layer, paddle.nn.Conv2D):
+                mask_name = layer.parameters()[0].name
+                if mask_name in self.prune_mask:
+                    print(mask_name)
+                    layer.set_mask(self.prune_mask[mask_name])
 
     def _init_metrics(self, validate=False):
         if self.mode == 'test' or (self.mode == 'train' and not validate):

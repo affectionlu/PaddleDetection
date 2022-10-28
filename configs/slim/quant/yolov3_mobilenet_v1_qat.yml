@@ -1,5 +1,6 @@
 # Weights of yolov3_mobilenet_v1_coco
-pretrain_weights: https://paddledet.bj.bcebos.com/models/yolov3_mobilenet_v1_270e_coco.pdparams
+pretrain_weights: ./pretrain_qat_model/yolov3_mbv1/prune_74.pdparams
+#pretrain_weights: output/yolov3_mobilenet_v1_qat/best_model.pdparams
 slim: QAT
 
 QAT:

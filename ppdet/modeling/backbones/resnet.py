@@ -26,6 +26,7 @@ from paddle.nn.initializer import Constant
 from paddle.vision.ops import DeformConv2D
 from .name_adapter import NameAdapter
 from ..shape_spec import ShapeSpec
+from paddle.nn.quant import quant_layers as quant_nn
 
 __all__ = ['ResNet', 'Res5Head', 'Blocks', 'BasicBlock', 'BottleNeck']
 
@@ -136,6 +137,7 @@ class SELayer(nn.Layer):
     def __init__(self, ch, reduction_ratio=16):
         super(SELayer, self).__init__()
         self.pool = nn.AdaptiveAvgPool2D(1)
+        self.pool_quantize1 = quant_nn.FakeQuantMovingAverageAbsMax(name = "quant1")
         stdv = 1.0 / math.sqrt(ch)
         c_ = ch // reduction_ratio
         self.squeeze = nn.Linear(
@@ -152,7 +154,7 @@ class SELayer(nn.Layer):
             bias_attr=True)
 
     def forward(self, inputs):
-        out = self.pool(inputs)
+        out = self.pool(self.pool_quantize1(inputs))
         out = paddle.squeeze(out, axis=[2, 3])
         out = self.squeeze(out)
         out = F.relu(out)
@@ -184,6 +186,8 @@ class BasicBlock(nn.Layer):
         super(BasicBlock, self).__init__()
         assert groups == 1 and base_width == 64, 'BasicBlock only supports groups=1 and base_width=64'
 
+        self.add_quantize1 = quant_nn.FakeQuantMovingAverageAbsMax(name = "quant1")
+        self.add_quantize2 = quant_nn.FakeQuantMovingAverageAbsMax(name = "quant2")
         self.shortcut = shortcut
         if not shortcut:
             if variant == 'd' and stride == 2:
@@ -252,7 +256,7 @@ class BasicBlock(nn.Layer):
         else:
             short = self.short(inputs)
 
-        out = paddle.add(x=out, y=short)
+        out = paddle.add(x=self.add_quantize1(out), y=self.add_quantize2(short))
         out = F.relu(out)
 
         return out
@@ -281,10 +285,11 @@ class BottleNeck(nn.Layer):
             stride1, stride2 = stride, 1
         else:
             stride1, stride2 = 1, stride
-
         # ResNeXt
         width = int(ch_out * (base_width / 64.)) * groups
 
+        self.add_quantize1 = quant_nn.FakeQuantMovingAverageAbsMax(name = "quant1")
+        self.add_quantize2 = quant_nn.FakeQuantMovingAverageAbsMax(name = "quant2")
         self.shortcut = shortcut
         if not shortcut:
             if variant == 'd' and stride == 2:
@@ -369,7 +374,7 @@ class BottleNeck(nn.Layer):
         else:
             short = self.short(inputs)
 
-        out = paddle.add(x=out, y=short)
+        out = paddle.add(x=self.add_quantize1(out), y=self.add_quantize2(short))
         out = F.relu(out)
 
         return out
@@ -530,6 +535,7 @@ class ResNet(nn.Layer):
         self._out_channels = [block.expansion * v for v in ch_out_list]
         self._out_strides = [4, 8, 16, 32]
 
+        self.pool_quantize1 = quant_nn.FakeQuantMovingAverageAbsMax(name = "quant1")
         self.res_layers = []
         for i in range(num_stages):
             lr_mult = lr_mult_list[i]
@@ -576,7 +582,7 @@ class ResNet(nn.Layer):
     def forward(self, inputs):
         x = inputs['image']
         conv1 = self.conv1(x)
-        x = F.max_pool2d(conv1, kernel_size=3, stride=2, padding=1)
+        x = F.max_pool2d(self.pool_quantize1(conv1), kernel_size=3, stride=2, padding=1)
         outs = []
         for idx, stage in enumerate(self.res_layers):
             x = stage(x)
